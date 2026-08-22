@@ -238,7 +238,11 @@ def repair_printify() -> dict:
     shop_id = _env("PRINTIFY_SHOP_ID")
     req = urllib.request.Request(
         "https://api.printify.com/v1/shops.json",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "ReallyRaisedRough-cloud/1.0",
+        },
         method="GET",
     )
     try:

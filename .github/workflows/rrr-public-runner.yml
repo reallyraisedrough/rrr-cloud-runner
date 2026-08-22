@@ -1,0 +1,68 @@
+name: RRR public runner
+
+# Public repo = free GitHub-hosted minutes. Private pack (no tokens) stays in rrr-always-on.
+# Offset from the private 17/47 cron so hosts pick up leftovers instead of colliding.
+on:
+  schedule:
+    - cron: "5,35 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rrr-public-runner
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      RRR_TIMEZONE: America/Phoenix
+      RRR_HOST_ID: public-runner
+      RRR_PUSH_FIRED: "1"
+      RRR_PACK_OWNER: reallyraisedrough
+      RRR_PACK_REPO: rrr-always-on
+      GH_PAT: ${{ secrets.GH_PAT }}
+      PRINTIFY_API_TOKEN: ${{ secrets.PRINTIFY_API_TOKEN }}
+      PRINTIFY_SHOP_ID: ${{ secrets.PRINTIFY_SHOP_ID }}
+      META_PAGE_ACCESS_TOKEN: ${{ secrets.META_PAGE_ACCESS_TOKEN }}
+      META_PAGE_ID: ${{ secrets.META_PAGE_ID }}
+      META_INSTAGRAM_ACCOUNT_ID: ${{ secrets.META_INSTAGRAM_ACCOUNT_ID }}
+      META_THREADS_ACCESS_TOKEN: ${{ secrets.META_THREADS_ACCESS_TOKEN }}
+      META_THREADS_USER_ID: ${{ secrets.META_THREADS_USER_ID }}
+      META_APP_ID: ${{ secrets.META_APP_ID }}
+      META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+      META_LONG_LIVED_USER_TOKEN: ${{ secrets.META_LONG_LIVED_USER_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_IDS: ${{ secrets.TELEGRAM_CHAT_IDS }}
+      TELEGRAM_MARKETING_CHAT_IDS: ${{ secrets.TELEGRAM_MARKETING_CHAT_IDS }}
+      X_API_KEY: ${{ secrets.X_API_KEY }}
+      X_API_SECRET: ${{ secrets.X_API_SECRET }}
+      X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+      X_ACCESS_TOKEN_SECRET: ${{ secrets.X_ACCESS_TOKEN_SECRET }}
+      X_FREE_POSTING_ONLY: "true"
+      YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+      YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+      YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Install python extras
+        run: python -m pip install --quiet pillow edge-tts cryptography
+      - name: Pull private schedule pack
+        run: python scripts/rrr_cloud_sync.py pull
+      - name: Immortal token repair
+        run: python scripts/immortal_cloud_repair.py
+      - name: Printify designs + products
+        run: python scripts/rrr_cloud_printify.py
+      - name: Run leftover due slots
+        run: python scripts/rrr_cloud_tick.py
+      - name: Push fired state back to private pack
+        if: always()
+        run: python scripts/rrr_cloud_sync.py push

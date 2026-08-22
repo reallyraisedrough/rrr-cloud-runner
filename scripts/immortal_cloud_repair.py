@@ -216,10 +216,26 @@ def repair_telegram() -> dict:
     return _fail(str(payload.get("description") or payload)[:160])
 
 
+def repair_instagram() -> dict:
+    token, ig = _env("META_PAGE_ACCESS_TOKEN"), _env("META_INSTAGRAM_ACCOUNT_ID")
+    if not token or not ig:
+        return _fail("not configured")
+    probe = _get(
+        f"{GRAPH}/{urllib.parse.quote(ig)}?fields=id,username&access_token={urllib.parse.quote(token)}"
+    )
+    if probe.get("id"):
+        return _ok(str(probe.get("username") or "instagram live"))
+    err = probe.get("error")
+    if isinstance(err, dict):
+        return _fail(str(err.get("message") or err)[:160])
+    return _fail(str(probe)[:160])
+
+
 def repair_printify() -> dict:
     token = _env("PRINTIFY_API_TOKEN")
     if not token:
         return _fail("not configured")
+    shop_id = _env("PRINTIFY_SHOP_ID")
     req = urllib.request.Request(
         "https://api.printify.com/v1/shops.json",
         headers={"Authorization": f"Bearer {token}"},
@@ -230,7 +246,15 @@ def repair_printify() -> dict:
             raw = resp.read().decode("utf-8", errors="replace")
         data = json.loads(raw) if raw.strip().startswith("[") or raw.strip().startswith("{") else {}
         shops = data if isinstance(data, list) else data.get("data") or []
-        return _ok(f"{len(shops)} shop(s)")
+        if not shops:
+            return _fail("token live but no shops")
+        if shop_id:
+            match = next((s for s in shops if str(s.get("id") or "") == shop_id), None)
+            if not match:
+                return _fail("shop id not in this Printify account")
+            title = str(match.get("title") or shop_id)[:60]
+            return _ok(f"{title} ({len(shops)} shop(s))")
+        return _fail("token live but PRINTIFY_SHOP_ID empty")
     except Exception as exc:
         return _fail(str(exc)[:160])
 
@@ -242,7 +266,7 @@ def _gh_pat() -> str:
 def _set_secret(name: str, value: str) -> dict:
     if not value:
         return {"ok": False, "error": "empty"}
-    repo = _env("GITHUB_REPOSITORY") or "ReallyRaisedRough/rrr-always-on"
+    repo = _env("GITHUB_REPOSITORY") or "reallyraisedrough/rrr-always-on"
     pat = _gh_pat()
     if not pat:
         return {"ok": False, "error": "no GH_PAT — secret not written"}
@@ -283,7 +307,8 @@ REPAIRERS = (
     ("youtube", repair_youtube),
     ("tiktok", repair_tiktok),
     ("snapchat", repair_snapchat),
-    ("meta", repair_meta),
+    ("facebook", repair_meta),
+    ("instagram", repair_instagram),
     ("threads", repair_threads),
     ("x", repair_x),
     ("telegram", repair_telegram),

@@ -431,15 +431,21 @@ def _create_kind(kind: str, art_id: str, headline: str, subline: str, price: int
     pid = str(created.get("id") or "")
     if not pid:
         raise RuntimeError(f"create {kind} failed: {created}")
-    try:
-        _api(
-            "POST",
-            f"/shops/{sid}/products/{pid}/publish.json",
-            {"title": True, "description": True, "images": True, "variants": True, "tags": True},
-        )
-        published = True
-    except Exception:
-        published = False
+    published = False
+    last_pub = ""
+    for _ in range(3):
+        try:
+            _api(
+                "POST",
+                f"/shops/{sid}/products/{pid}/publish.json",
+                {"title": True, "description": True, "images": True, "variants": True, "tags": True},
+            )
+            published = True
+            last_pub = ""
+            break
+        except Exception as exc:
+            last_pub = str(exc)[:120]
+            time.sleep(2)
     src = ""
     for _ in range(6):
         time.sleep(3)
@@ -456,6 +462,7 @@ def _create_kind(kind: str, art_id: str, headline: str, subline: str, price: int
         "image_url": src,
         "product_url": checkout_url(pid, created.get("title") or title),
         "published": published,
+        "publish_error": last_pub,
     }
 
 
@@ -632,24 +639,25 @@ def _drop_one(*, kind_mode: str, new_art: bool) -> dict:
         subline = "related drop"
         art_id = str(source.get("art_id") or "")
         related_from = source.get("id") or ""
-    last_kind = str((_load(STATE_PATH, {}) or {}).get("last_kind") or "")
-    kinds = [k for k in PRESETS if k != last_kind] or list(PRESETS)
-    kind = random.choice(kinds)
+    kinds = [k for k in ("tee", "hoodie", "mug", "hat", "glass") if k in PRESETS]
     made = []
-    try:
-        made.append(_create_kind(kind, art_id, headline, subline, PRESETS[kind]["price"], use_logo=True))
-    except Exception as exc:
+    for kind in kinds:
         try:
-            made.append(_create_kind(kind, art_id, headline, subline, PRESETS[kind]["price"], use_logo=False))
-        except Exception as exc2:
-            made.append({"ok": False, "kind": kind, "error": str(exc2)[:160], "first": str(exc)[:80]})
+            made.append(_create_kind(kind, art_id, headline, subline, PRESETS[kind]["price"], use_logo=True))
+        except Exception as exc:
+            try:
+                made.append(_create_kind(kind, art_id, headline, subline, PRESETS[kind]["price"], use_logo=False))
+            except Exception as exc2:
+                made.append({"ok": False, "kind": kind, "error": str(exc2)[:160], "first": str(exc)[:80]})
+    ok_kinds = [str(p.get("kind") or "") for p in made if isinstance(p, dict) and p.get("ok")]
     return {
-        "kind": kind,
+        "kind": (ok_kinds[-1] if ok_kinds else (kinds[0] if kinds else "")),
         "headline": headline,
         "related_from": related_from,
         "new_art": new_art,
         "products": made,
         "ok": any(p.get("ok") for p in made if isinstance(p, dict)),
+        "published": sum(1 for p in made if isinstance(p, dict) and p.get("published")),
     }
 
 

@@ -194,6 +194,8 @@ def repair_threads() -> dict:
 
 
 def repair_x() -> dict:
+    import hashlib
+
     key, secret, token, token_secret = (
         _env("X_API_KEY"),
         _env("X_API_SECRET"),
@@ -202,7 +204,8 @@ def repair_x() -> dict:
     )
     if not (key and secret and token and token_secret):
         return _fail("OAuth 1.0a not configured")
-    return _ok("OAuth 1.0a seeds present (free posting)")
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:10]
+    return _ok(f"OAuth 1.0a seeds present sha={digest} lens={len(key)}/{len(secret)}/{len(token)}/{len(token_secret)}")
 
 
 def repair_telegram() -> dict:

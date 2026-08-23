@@ -574,9 +574,10 @@ def _make_video(image: Path, dest: Path, seconds: int, audio: Path | None = None
     return dest if dest.is_file() and dest.stat().st_size > 200 else None
 
 
-def _form(url: str, fields: dict, timeout: int = 40) -> dict:
+def _form(url: str, fields: dict, timeout: int = 40, headers: dict | None = None) -> dict:
     data = urllib.parse.urlencode(fields).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
+    hdrs = {"Content-Type": "application/x-www-form-urlencoded", **(headers or {})}
+    req = urllib.request.Request(url, data=data, method="POST", headers=hdrs)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
@@ -825,7 +826,10 @@ def _x_header(method: str, url: str, extra: dict | None = None) -> str:
 
 def _x_upload(path: Path) -> str:
     url = "https://upload.twitter.com/1.1/media/upload.json"
-    mime = "video/mp4" if path.suffix.lower() == ".mp4" else "image/jpeg"
+    suffix = path.suffix.lower()
+    if suffix in {".mp4", ".mov", ".m4v"}:
+        return _x_upload_video(path, url)
+    mime = "image/png" if suffix == ".png" else "image/jpeg"
     payload = _multipart(
         url,
         {},
@@ -835,11 +839,90 @@ def _x_upload(path: Path) -> str:
     )
     media_id = payload.get("media_id_string") or payload.get("media_id")
     if not media_id:
-        raise RuntimeError(f"X media upload failed: {payload}")
+        raise RuntimeError(f"X media upload failed:{_x_err(payload)}")
     return str(media_id)
 
 
-def _x_status(caption: str, media_id: str = "") -> str:
+def _x_upload_video(path: Path, url: str) -> str:
+    raw = path.read_bytes()
+    init = _form(
+        url,
+        {
+            "command": "INIT",
+            "total_bytes": str(len(raw)),
+            "media_type": "video/mp4",
+            "media_category": "tweet_video",
+        },
+        headers={"Authorization": _x_header("POST", url, {
+            "command": "INIT",
+            "total_bytes": str(len(raw)),
+            "media_type": "video/mp4",
+            "media_category": "tweet_video",
+        })},
+    )
+    media_id = str(init.get("media_id_string") or init.get("media_id") or "")
+    if not media_id:
+        raise RuntimeError(f"X video INIT failed:{_x_err(init)}")
+    chunk = 4 * 1024 * 1024
+    index = 0
+    offset = 0
+    while offset < len(raw):
+        piece = raw[offset : offset + chunk]
+        payload = _multipart(
+            url,
+            {"command": "APPEND", "media_id": media_id, "segment_index": str(index)},
+            [("media", "chunk.mp4", piece, "application/octet-stream")],
+            timeout=180,
+            headers={"Authorization": _x_header("POST", url)},
+        )
+        if payload.get("error") and not payload.get("media_id_string"):
+            raise RuntimeError(f"X video APPEND failed:{_x_err(payload)}")
+        offset += len(piece)
+        index += 1
+    fin = _form(
+        url,
+        {"command": "FINALIZE", "media_id": media_id},
+        headers={"Authorization": _x_header("POST", url, {"command": "FINALIZE", "media_id": media_id})},
+    )
+    if fin.get("error") and not (fin.get("media_id_string") or fin.get("media_id")):
+        raise RuntimeError(f"X video FINALIZE failed:{_x_err(fin)}")
+    return media_id
+
+
+def _x_err(payload: object) -> str:
+    text = str(payload)[:160]
+    for needle in ("oauth_token", "oauth_consumer", "Bearer ", "AAAA"):
+        if needle.lower() in text.lower():
+            return "redacted"
+    return text
+
+
+def _x_json_post(url: str, body: dict) -> tuple[int, dict]:
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={
+            "Authorization": _x_header("POST", url),
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            payload = json.loads(raw) if raw.strip().startswith("{") else {"raw": raw[:200]}
+            return int(getattr(resp, "status", 200) or 200), payload
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:200]
+        try:
+            payload = json.loads(detail) if detail.strip().startswith("{") else {"error": detail}
+        except Exception:
+            payload = {"error": detail or str(exc.code)}
+        return int(exc.code), payload
+
+
+def _x_status_v1(caption: str, media_id: str = "") -> str:
     url = "https://api.twitter.com/1.1/statuses/update.json"
     params = {"status": caption[:280]}
     if media_id:
@@ -859,9 +942,39 @@ def _x_status(caption: str, media_id: str = "") -> str:
             payload = json.loads(resp.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:200]
-        return f"failed:{exc.code}:{detail}"
+        return f"failed:v1:{exc.code}:{_x_err(detail)}"
     ident = payload.get("id_str") or payload.get("id")
-    return f"ok:{ident}" if ident else f"failed:{payload}"[:160]
+    return f"ok:{ident}" if ident else f"failed:v1:{_x_err(payload)}"
+
+
+def _x_status(caption: str, media_id: str = "") -> str:
+    """v2 tweets first — v1.1 statuses/update is 404 for free OAuth 1.0a apps."""
+    text = caption[:280]
+    body: dict = {"text": text}
+    if media_id:
+        body["media"] = {"media_ids": [str(media_id)]}
+    last = "failed"
+    for url in ("https://api.twitter.com/2/tweets", "https://api.x.com/2/tweets"):
+        code, payload = _x_json_post(url, body)
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        ident = data.get("id") if isinstance(data, dict) else None
+        if ident:
+            return f"ok:{ident}"
+        last = f"failed:v2:{code}:{_x_err(payload)}"
+        # 402 = X pay-per-use credits depleted. v1.1 and text-only hit the same wall.
+        if code == 402:
+            return last
+        if code not in (404, 410):
+            break
+    v1 = _x_status_v1(caption, media_id)
+    if v1.startswith("ok:"):
+        return v1
+    if media_id:
+        text_only = _x_status(caption, "")
+        if text_only.startswith("ok:"):
+            return f"{text_only}:media_dropped"
+        return f"{last}|{v1}|{text_only}"[:160]
+    return f"{last}|{v1}"[:160]
 
 
 def post_x(caption: str, media: Path | None) -> str:
@@ -872,7 +985,10 @@ def post_x(caption: str, media: Path | None) -> str:
         media_id = _x_upload(media) if media and media.is_file() else ""
         return _x_status(caption, media_id)
     except Exception as exc:
-        return f"failed:{exc}"[:160]
+        try:
+            return _x_status(caption, "")
+        except Exception:
+            return f"failed:{_x_err(exc)}"[:160]
 
 
 def _youtube_token() -> str:

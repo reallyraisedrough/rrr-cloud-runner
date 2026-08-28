@@ -29,7 +29,7 @@ except Exception:  # pragma: no cover
 ROOT = Path(__file__).resolve().parent.parent
 PACK_PATH = Path(os.getenv("RRR_PACK_PATH") or (ROOT / "pack.json"))
 STATE_PATH = Path(os.getenv("RRR_PRINTIFY_STATE") or (ROOT / "printify_drop_state.json"))
-STORE = "https://reallyraisedrough.com"
+STORE = "https://really-raised-rough.printify.me"
 API = "https://api.printify.com/v1"
 LOGO_ID = "6a81629b23d927985dfff0e5"
 OLD_LOGO_IDS = {"69cc103f1c19c8d41d99ad0d", "5941187eb8e7e37b3f0e62e5"}
@@ -370,8 +370,8 @@ def _funny_related(source_title: str, kind: str) -> tuple[str, str]:
         ("glass", "sarcastic"): (f"{raw} Glass Cup", f"Congrats. You poured a drink. {raw}."),
     }
     title, desc = jokes.get((kind, humor)) or jokes.get((kind, "dark_humor")) or (f"{raw} | {label}", f"{raw}.")
-    title = f"{title} | reallyraisedrough.com"
-    desc = f"This design says \"{raw}\". {desc} {humor.replace('_', ' ')}. Shop reallyraisedrough.com"
+    title = f"{title} | really-raised-rough.printify.me"
+    desc = f"This design says \"{raw}\". {desc} {humor.replace('_', ' ')}. Shop https://really-raised-rough.printify.me"
     desc = re.sub(r"\$\s*\d+", "", desc)
     return title[:120], desc
 

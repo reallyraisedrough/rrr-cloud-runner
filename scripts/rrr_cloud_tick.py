@@ -312,29 +312,68 @@ def humor_for(slot: dict, clock: dict) -> str:
     return HUMOR_STYLES[idx]
 
 
-def order_caption(product: dict, platform: str, *, humor: str = "") -> str:
-    title = product.get("product_title") or product.get("title") or "Really Raised Rough"
-    url = checkout_url(str(product.get("product_url") or ""))
-    hook = HUMOR_HOOKS.get(humor, HUMOR_HOOKS["dark_humor"]) if humor else HUMOR_HOOKS["dark_humor"]
-    cap = (
-        f"{hook}\n"
-        f"🛒 ORDER NOW — pick size, color, enter address, checkout:\n{url}\n"
-        f"{title}\n"
-        f"Follow: IG @reallyraisedrough · Threads @reallyraisedrough · "
-        f"YT @ReallyRRough · X @RRough10304 · TG @ReallyRaisedRough\n"
-        f"#reallyraisedrough #soberlife #recovery"
-    )
+COM_STORE = "https://reallyraisedrough.com"
+PRINTIFY_STORE = "https://really-raised-rough.printify.me"
+
+_PLATFORM_MATCH = {
+    "facebook": "{title} on this {kind} — Facebook write-up for that exact design.",
+    "instagram": "IG: {title} printed on this {kind}. Title matches the graphic.",
+    "threads": "Threads drop: {title} {kind}. Same words as the print.",
+    "youtube": "This video is the {title} {kind}. Title, design, and checkout are the same piece.",
+    "x": "{title} {kind}. Same design as the title.",
+    "telegram": "RRR channel: {title} {kind}. Title matches the print.",
+    "tiktok": "TikTok: {title} on this {kind}. That's the design you're buying.",
+    "snapchat": "Snap: {title} {kind}. Same title. Same design.",
+}
+
+
+def _kind_from_title(title: str, product: dict | None = None) -> str:
+    kind = str((product or {}).get("product_type") or (product or {}).get("kind") or "").lower()
+    labels = {
+        "tee": "graphic tee",
+        "hoodie": "sweatshirt",
+        "sweatshirt": "sweatshirt",
+        "mug": "mug",
+        "hat": "hat",
+        "glass": "glass cup",
+    }
+    if kind in labels:
+        return labels[kind]
+    low = (title or "").lower()
+    for key, label in labels.items():
+        if key in low or label in low:
+            return label
+    return "piece"
+
+
+def order_caption(product: dict, platform: str, *, humor: str = "", post_type: str = "image") -> str:
+    title = re.sub(
+        r"\s*[|\-—].*$",
+        "",
+        str(product.get("product_title") or product.get("title") or "Really Raised Rough"),
+    ).strip() or "Really Raised Rough"
+    url = checkout_url(str(product.get("product_url") or STORE))
+    path = url[len(STORE.rstrip("/")) :] if url.startswith(STORE.rstrip("/")) else ""
+    com_url = f"{COM_STORE}{path}" if path else COM_STORE
+    kind = _kind_from_title(title, product)
     plat = (platform or "").lower()
+    ptype = (post_type or "image").lower()
+    hook = HUMOR_HOOKS.get(humor, HUMOR_HOOKS["dark_humor"]) if humor else HUMOR_HOOKS["dark_humor"]
+    match = _PLATFORM_MATCH.get(plat, _PLATFORM_MATCH["facebook"]).format(title=title, kind=kind)
+    shops = f"{COM_STORE}\n{PRINTIFY_STORE}"
     if plat == "x":
-        return f"{hook}\n🛒 ORDER NOW:\n{url}"[:275]
+        return f"{title} {kind}\n{match}\n{url}\n{COM_STORE}\n{PRINTIFY_STORE}"[:275]
     if plat == "threads":
-        return cap[:500]
+        return f"{match}\n🛒 ORDER NOW:\n{url}\n{shops}"[:500]
     if plat == "youtube":
         return (
-            f"{title} | Really Raised Rough\n\n"
+            f"{title} | Really Raised Rough {kind}\n\n"
             f"{hook}\n"
+            f"{match}\n\n"
             f"🛒 ORDER NOW — pick size, color, enter address, checkout:\n{url}\n"
-            f"Full store: {STORE}\n\n"
+            f"{com_url}\n"
+            f"Shop: {COM_STORE}\n"
+            f"Shop: {PRINTIFY_STORE}\n\n"
             "Follow Really Raised Rough:\n"
             "Instagram https://www.instagram.com/reallyraisedrough\n"
             "Threads https://www.threads.net/@reallyraisedrough\n"
@@ -342,7 +381,17 @@ def order_caption(product: dict, platform: str, *, humor: str = "") -> str:
             "X https://x.com/RRough10304\n"
             "Telegram https://t.me/ReallyRaisedRough\n"
         )
-    return cap[:1800]
+    return (
+        f"{title}\n"
+        f"{hook}\n"
+        f"{match}\n"
+        f"This {ptype} is the {title} {kind} — the description matches the design.\n"
+        f"🛒 ORDER NOW — pick size, color, enter address, checkout:\n{url}\n"
+        f"{com_url}\n"
+        f"Shop: {COM_STORE}\n"
+        f"Shop: {PRINTIFY_STORE}\n"
+        f"#reallyraisedrough #soberlife #recovery"
+    )[:1800]
 
 
 def _pick(pack: dict, slot: dict | None = None, clock: dict | None = None) -> dict:
@@ -1287,7 +1336,7 @@ def execute_slot(slot: dict, pack: dict, work: Path, clock: dict | None = None) 
     humor = humor_for(slot, clock)
     product = _pick(pack, slot, clock)
     image_url = str(product.get("image_url") or product.get("image") or "")
-    cap = order_caption(product, plat, humor=humor)
+    cap = order_caption(product, plat, humor=humor, post_type=ptype)
     if DRY:
         return f"dry:{plat}/{ptype}/{humor}"
     image_path = None
@@ -1325,8 +1374,8 @@ def execute_slot(slot: dict, pack: dict, work: Path, clock: dict | None = None) 
             return post_x(cap, video_path or image_path)
         if plat == "youtube":
             title = str(product.get("product_title") or "Really Raised Rough")[:80]
-            if "printify.me" not in title.lower() and "reallyraisedrough.com" not in title.lower():
-                title = f"{title} | really-raised-rough.printify.me"
+            if "reallyraisedrough.com" not in title.lower():
+                title = f"{title} | reallyraisedrough.com"
             return post_youtube(video_path or Path(), title, cap, is_short=(ptype != "video"))
         if plat == "tiktok":
             if not video_path:

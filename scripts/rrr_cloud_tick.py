@@ -459,11 +459,11 @@ def _humor_script(
         "Rough honesty. Clean living.",
     )
     ctas = (
-        "Order now at reallyraisedrough.com",
-        "Tap ORDER NOW. reallyraisedrough.com",
-        "Shop the store. reallyraisedrough.com",
-        "Size, color, address, checkout. reallyraisedrough.com",
-        "Link in the post. reallyraisedrough.com",
+        "Order now at https://really-raised-rough.printify.me",
+        "Tap ORDER NOW. https://really-raised-rough.printify.me",
+        "Shop the store. https://really-raised-rough.printify.me",
+        "Size, color, address, checkout. https://really-raised-rough.printify.me",
+        "Link in the post. https://really-raised-rough.printify.me",
     )
     idx = _rotate_index(
         (clock or {}).get("date"),
@@ -1325,8 +1325,8 @@ def execute_slot(slot: dict, pack: dict, work: Path, clock: dict | None = None) 
             return post_x(cap, video_path or image_path)
         if plat == "youtube":
             title = str(product.get("product_title") or "Really Raised Rough")[:80]
-            if "reallyraisedrough.com" not in title.lower():
-                title = f"{title} | reallyraisedrough.com"
+            if "printify.me" not in title.lower() and "reallyraisedrough.com" not in title.lower():
+                title = f"{title} | really-raised-rough.printify.me"
             return post_youtube(video_path or Path(), title, cap, is_short=(ptype != "video"))
         if plat == "tiktok":
             if not video_path:

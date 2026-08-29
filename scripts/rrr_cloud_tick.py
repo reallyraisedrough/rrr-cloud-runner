@@ -806,6 +806,44 @@ def post_telegram_video(video: Path, caption: str) -> str:
     return last
 
 
+def notify_telegram_post(
+    platform: str,
+    post_type: str,
+    result: str,
+    *,
+    source: str,
+    at: str,
+) -> str:
+    """Send a best-effort Telegram confirmation after a real platform post."""
+    token = _env("TELEGRAM_BOT_TOKEN")
+    chats = [
+        value
+        for value in (_env("TELEGRAM_MARKETING_CHAT_IDS") or _env("TELEGRAM_CHAT_IDS"))
+        .replace(",", " ")
+        .split()
+        if value
+    ]
+    if not token or not chats:
+        return "skipped_no_telegram"
+    label = (platform or "unknown").replace("_", " ").title()
+    message = (
+        "✅ RRR post published\n"
+        f"Platform: {label}\n"
+        f"Type: {post_type or 'post'}\n"
+        f"Source: {source}\n"
+        f"Result: {str(result)[:180]}\n"
+        f"Time: {at}"
+    )
+    delivered = 0
+    for chat in chats[:3]:
+        payload = _form(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            {"chat_id": chat, "text": message[:3500]},
+        )
+        delivered += int(bool(payload.get("ok")))
+    return f"ok:{delivered}/{min(len(chats), 3)}" if delivered else "failed"
+
+
 def _x_keys() -> tuple[str, str, str, str]:
     key, secret, token, token_secret = (
         _env("X_API_KEY"),
@@ -1459,6 +1497,15 @@ def run() -> dict:
             )
             if _success(result):
                 slot["last_fired_key"] = key
+                notification = notify_telegram_post(
+                    plat,
+                    str(slot.get("post_type") or "post"),
+                    result,
+                    source="schedule",
+                    at=clock["iso"],
+                )
+            else:
+                notification = "not_sent_post_failed"
             results.append(
                 {
                     "id": slot.get("id"),
@@ -1467,6 +1514,7 @@ def run() -> dict:
                     "humor": humor,
                     "host": os.getenv("RRR_HOST_ID") or "cloud",
                     "result": result,
+                    "telegram_notification": notification,
                 }
             )
         for qkey, job in claimed_q:
@@ -1494,6 +1542,17 @@ def run() -> dict:
                 now_iso=clock["iso"],
                 extra={"platform": plat, "humor": humor, "source": "unlimited-queue"},
             )
+            notification = (
+                notify_telegram_post(
+                    plat,
+                    str(job.get("post_type") or "post"),
+                    result,
+                    source="unlimited-queue",
+                    at=clock["iso"],
+                )
+                if _success(result)
+                else "not_sent_post_failed"
+            )
             results.append(
                 {
                     "id": job.get("id"),
@@ -1504,6 +1563,7 @@ def run() -> dict:
                     "source": "unlimited-queue",
                     "host": os.getenv("RRR_HOST_ID") or "cloud",
                     "result": result,
+                    "telegram_notification": notification,
                 }
             )
     if not DRY:

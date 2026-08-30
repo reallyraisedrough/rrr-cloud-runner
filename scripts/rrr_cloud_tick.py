@@ -253,6 +253,8 @@ def execute_queue_job(job: dict, pack: dict, work: Path, clock: dict) -> str:
             import rrr_cloud_printify
 
             drop = rrr_cloud_printify._drop_one(kind_mode="queue", new_art=True)
+            if drop.get("skipped"):
+                return "skipped:creation_owned_by_start_jarvis"
             if drop.get("ok"):
                 try:
                     rrr_cloud_printify.sync_mockups_into_pack()

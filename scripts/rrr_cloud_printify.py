@@ -88,6 +88,8 @@ def _today() -> str:
 
 
 def _api(method: str, path: str, body: dict | None = None, timeout: int = 90):
+    if method.upper() == "POST" and re.fullmatch(r"/shops/[^/]+/products\.json", path):
+        raise RuntimeError("Cloud product creation disabled: Start Jarvis owns the two-product weekly budget.")
     token = _token()
     if not token:
         raise RuntimeError("PRINTIFY_API_TOKEN missing")
@@ -622,43 +624,9 @@ def _iso_week() -> str:
 
 
 def _drop_one(*, kind_mode: str, new_art: bool) -> dict:
-    today = _today()
-    source = {}
-    try:
-        source = _source_design()
-    except Exception:
-        source = {}
-    if new_art or not source.get("art_id"):
-        idx = datetime.now(timezone.utc).timetuple().tm_yday % len(TOPICS)
-        headline, subline = TOPICS[idx]
-        png = _make_art(headline, subline)
-        art_id = upload_png(png, f"rrr-cloud-{kind_mode}-{today}.png")
-        related_from = ""
-    else:
-        headline = str(source["title"])
-        subline = "related drop"
-        art_id = str(source.get("art_id") or "")
-        related_from = source.get("id") or ""
-    kinds = [k for k in ("tee", "hoodie", "mug", "hat", "glass") if k in PRESETS]
-    made = []
-    for kind in kinds:
-        try:
-            made.append(_create_kind(kind, art_id, headline, subline, PRESETS[kind]["price"], use_logo=True))
-        except Exception as exc:
-            try:
-                made.append(_create_kind(kind, art_id, headline, subline, PRESETS[kind]["price"], use_logo=False))
-            except Exception as exc2:
-                made.append({"ok": False, "kind": kind, "error": str(exc2)[:160], "first": str(exc)[:80]})
-    ok_kinds = [str(p.get("kind") or "") for p in made if isinstance(p, dict) and p.get("ok")]
-    return {
-        "kind": (ok_kinds[-1] if ok_kinds else (kinds[0] if kinds else "")),
-        "headline": headline,
-        "related_from": related_from,
-        "new_art": new_art,
-        "products": made,
-        "ok": any(p.get("ok") for p in made if isinstance(p, dict)),
-        "published": sum(1 for p in made if isinstance(p, dict) and p.get("published")),
-    }
+    """Cloud promotes existing products; local Start Jarvis alone creates new ones."""
+    return {"ok": False, "skipped": True,
+            "reason": "Product creation belongs to Start Jarvis: two unique products per week."}
 
 
 def create_daily_set() -> dict:

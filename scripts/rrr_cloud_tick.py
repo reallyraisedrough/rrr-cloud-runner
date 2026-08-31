@@ -43,6 +43,8 @@ STORE = "https://really-raised-rough.printify.me"
 IDENTITY = "https://2.3.4.6.1.8:0219/"
 TZ_NAME = os.getenv("RRR_TIMEZONE") or "America/Phoenix"
 DRY = (os.getenv("RRR_DRY_RUN") or "").strip().lower() in ("1", "true", "yes", "on")
+# X website posting remains available manually; API automation is opt-in.
+X_MANUAL_ONLY = (os.getenv("RRR_X_MANUAL_ONLY", "true") or "true").strip().lower() in ("1", "true", "yes", "on")
 MAX_DUE = 12
 _PRODUCT_RE = re.compile(r"/product/(\d+)(?:/([^/?#\s]+))?", re.I)
 QUEUE_CATALOG = (
@@ -180,6 +182,8 @@ def due_slots(pack: dict, fired: dict, clock: dict) -> list[dict]:
         if slot.get("last_fired_key") == key and _success(slot.get("last_result")):
             continue
         plat = str(slot.get("platform") or "").lower()
+        if plat == "x" and X_MANUAL_ONLY:
+            continue
         if plat not in PLATFORMS:
             continue
         if not _platform_ready(plat):
@@ -1093,9 +1097,10 @@ def _x_status(caption: str, media_id: str = "") -> str:
         if ident:
             return f"ok:{ident}"
         last = f"failed:v2:{code}:{_x_err(payload)}"
-        # 402 = X pay-per-use credits depleted. v1.1 and text-only hit the same wall.
+        # A 402 on v2 can be endpoint-specific. Still try the legacy OAuth 1.0a
+        # route below; some app tiers retain write access there.
         if code == 402:
-            return last
+            continue
         if code not in (404, 410):
             break
     v1 = _x_status_v1(caption, media_id)

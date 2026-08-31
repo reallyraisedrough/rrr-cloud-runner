@@ -625,22 +625,47 @@ def _make_video(image: Path, dest: Path, seconds: int, audio: Path | None = None
     return dest if dest.is_file() and dest.stat().st_size > 200 else None
 
 
+def _retryable_http(code: int) -> bool:
+    """Only retry temporary service failures; never hide auth/permission errors."""
+    return code == 408 or code == 425 or code == 429 or 500 <= code <= 599
+
+
+def _retryable_network(exc: BaseException) -> bool:
+    text = f"{exc} {getattr(exc, 'reason', '')}".lower()
+    return isinstance(exc, (TimeoutError, ConnectionError, OSError, urllib.error.URLError)) and any(
+        needle in text
+        for needle in (
+            "timed out", "timeout", "temporarily unavailable", "connection reset",
+            "connection aborted", "remote end closed", "eof occurred", "broken pipe",
+            "winerror 10053", "winerror 10054", "winerror 10060",
+        )
+    )
+
+
 def _form(url: str, fields: dict, timeout: int = 40, headers: dict | None = None) -> dict:
     data = urllib.parse.urlencode(fields).encode("utf-8")
     hdrs = {"Content-Type": "application/x-www-form-urlencoded", **(headers or {})}
-    req = urllib.request.Request(url, data=data, method="POST", headers=hdrs)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-        return json.loads(raw) if raw.strip().startswith("{") else {"raw": raw[:200]}
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")[:300]
+    for attempt in range(4):
+        req = urllib.request.Request(url, data=data, method="POST", headers=hdrs)
         try:
-            return json.loads(raw)
-        except Exception:
-            return {"error": raw or str(exc)}
-    except Exception as exc:
-        return {"error": str(exc)[:200]}
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw.strip().startswith("{") else {"raw": raw[:200]}
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")[:300]
+            if attempt < 3 and _retryable_http(exc.code):
+                time.sleep(min(12, 1.5 * (2 ** attempt)))
+                continue
+            try:
+                return json.loads(raw)
+            except Exception:
+                return {"error": raw or str(exc)}
+        except Exception as exc:
+            if attempt < 3 and _retryable_network(exc):
+                time.sleep(min(8, 1.0 * (2 ** attempt)))
+                continue
+            return {"error": str(exc)[:200]}
+    return {"error": "request retry budget exhausted"}
 
 
 def _multipart(url: str, fields: dict[str, str], files: list[tuple[str, str, bytes, str]], timeout: int = 180, headers: dict | None = None) -> dict:
@@ -662,19 +687,27 @@ def _multipart(url: str, fields: dict[str, str], files: list[tuple[str, str, byt
     parts.append(f"--{boundary}--\r\n".encode())
     body = b"".join(parts)
     hdrs = {"Content-Type": f"multipart/form-data; boundary={boundary}", **(headers or {})}
-    req = urllib.request.Request(url, data=body, method="POST", headers=hdrs)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-        return json.loads(raw) if raw.strip().startswith("{") else {"raw": raw[:200]}
-    except urllib.error.HTTPError as exc:
-        raw = exc.read().decode("utf-8", errors="replace")[:300]
+    for attempt in range(4):
+        req = urllib.request.Request(url, data=body, method="POST", headers=hdrs)
         try:
-            return json.loads(raw)
-        except Exception:
-            return {"error": raw or str(exc)}
-    except Exception as exc:
-        return {"error": str(exc)[:200]}
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+            return json.loads(raw) if raw.strip().startswith("{") else {"raw": raw[:200]}
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")[:300]
+            if attempt < 3 and _retryable_http(exc.code):
+                time.sleep(min(15, 2.0 * (2 ** attempt)))
+                continue
+            try:
+                return json.loads(raw)
+            except Exception:
+                return {"error": raw or str(exc)}
+        except Exception as exc:
+            if attempt < 3 and _retryable_network(exc):
+                time.sleep(min(10, 1.5 * (2 ** attempt)))
+                continue
+            return {"error": str(exc)[:200]}
+    return {"error": "request retry budget exhausted"}
 
 
 def post_facebook_image(image: str, caption: str) -> str:
@@ -988,27 +1021,37 @@ def _x_err(payload: object) -> str:
 
 def _x_json_post(url: str, body: dict) -> tuple[int, dict]:
     data = json.dumps(body).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        method="POST",
-        headers={
-            "Authorization": _x_header("POST", url),
-            "Content-Type": "application/json",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            payload = json.loads(raw) if raw.strip().startswith("{") else {"raw": raw[:200]}
-            return int(getattr(resp, "status", 200) or 200), payload
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:200]
+    for attempt in range(4):
+        req = urllib.request.Request(
+            url,
+            data=data,
+            method="POST",
+            headers={
+                "Authorization": _x_header("POST", url),
+                "Content-Type": "application/json",
+            },
+        )
         try:
-            payload = json.loads(detail) if detail.strip().startswith("{") else {"error": detail}
-        except Exception:
-            payload = {"error": detail or str(exc.code)}
-        return int(exc.code), payload
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                payload = json.loads(raw) if raw.strip().startswith("{") else {"raw": raw[:200]}
+                return int(getattr(resp, "status", 200) or 200), payload
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:200]
+            if attempt < 3 and _retryable_http(exc.code):
+                time.sleep(min(12, 1.5 * (2 ** attempt)))
+                continue
+            try:
+                payload = json.loads(detail) if detail.strip().startswith("{") else {"error": detail}
+            except Exception:
+                payload = {"error": detail or str(exc.code)}
+            return int(exc.code), payload
+        except Exception as exc:
+            if attempt < 3 and _retryable_network(exc):
+                time.sleep(min(8, 1.0 * (2 ** attempt)))
+                continue
+            return 599, {"error": str(exc)[:200]}
+    return 599, {"error": "X request retry budget exhausted"}
 
 
 def _x_status_v1(caption: str, media_id: str = "") -> str:

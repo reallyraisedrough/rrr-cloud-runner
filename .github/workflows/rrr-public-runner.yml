@@ -54,6 +54,7 @@ jobs:
       SNAPCHAT_REFRESH_TOKEN: ${{ secrets.SNAPCHAT_REFRESH_TOKEN }}
       SNAPCHAT_ACCESS_TOKEN: ${{ secrets.SNAPCHAT_ACCESS_TOKEN }}
       SNAPCHAT_PUBLIC_PROFILE_ID: ${{ secrets.SNAPCHAT_PUBLIC_PROFILE_ID }}
+      SNAPCHAT_PUBLIC_PROFILE_ID_FALLBACK: bd13dd40-6b0e-4b9a-8936-f335426806ee
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

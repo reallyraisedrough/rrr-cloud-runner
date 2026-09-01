@@ -116,6 +116,30 @@ def _env(key: str) -> str:
 def _load(path: Path, fallback):
     if not path.is_file():
         return fallback
+
+
+def _load_effective_pack() -> dict:
+    """Load the cloud pack without letting a queue-only export drop the schedule.
+
+    Older queue exports wrote only ``{"queue": ...}`` to ``pack.json``.  The
+    authoritative schedule remains in ``data/social_schedule.json``; using it
+    as a fallback keeps the always-on tick live while the next Start Jarvis
+    export repairs the private pack.
+    """
+    pack = _load(PACK_PATH, {})
+    if not isinstance(pack, dict):
+        pack = {}
+    sched = pack.get("schedule")
+    if isinstance(sched, dict) and isinstance(sched.get("slots"), list):
+        return pack
+    fallback = _load(ROOT / "data" / "social_schedule.json", {})
+    if isinstance(fallback, dict) and isinstance(fallback.get("slots"), list):
+        merged = dict(pack)
+        merged["schedule"] = fallback
+        merged.setdefault("timezone", fallback.get("timezone") or TZ_NAME)
+        merged.setdefault("source", "local_schedule_fallback")
+        return merged
+    return pack
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
@@ -1537,7 +1561,7 @@ def execute_slot(slot: dict, pack: dict, work: Path, clock: dict | None = None) 
 
 
 def run() -> dict:
-    pack = _load(PACK_PATH, {})
+    pack = _load_effective_pack()
     fired = _load(FIRED_PATH, {})
     if not isinstance(fired, dict):
         fired = {}

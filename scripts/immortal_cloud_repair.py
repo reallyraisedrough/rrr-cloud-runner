@@ -1,7 +1,7 @@
 """Cloud-safe OAuth / token / secret repair.
 
 Runs on GitHub Actions (stdlib + urllib). Never prints secret values.
-Refreshes YouTube, TikTok, Snapchat, Meta, Threads when grants are present.
+Refreshes YouTube, TikTok, Snapchat, and Meta when grants are present.
 If GH_PAT is set, writes rotated tokens back to Actions secrets so the next
 30-minute tick stays immortal with the laptop off.
 """
@@ -173,26 +173,6 @@ def repair_meta() -> dict:
     return {"ok": True, "detail": "Meta long-lived renewed", "secrets": secrets}
 
 
-def repair_threads() -> dict:
-    token = _env("META_THREADS_ACCESS_TOKEN")
-    uid = _env("META_THREADS_USER_ID")
-    if not token:
-        return _fail("not configured")
-    refreshed = _form(
-        "https://graph.threads.net/refresh_access_token",
-        {"grant_type": "th_refresh_token", "access_token": token},
-    )
-    new_token = str(refreshed.get("access_token") or "")
-    if new_token:
-        return {"ok": True, "detail": "Threads token renewed", "secrets": {"META_THREADS_ACCESS_TOKEN": new_token}}
-    if uid:
-        probe = _get(f"https://graph.threads.net/v1.0/{uid}?fields=id,username&access_token={urllib.parse.quote(token)}")
-        if probe.get("id"):
-            return _ok(str(probe.get("username") or "live"))
-    err = str(refreshed.get("error") or refreshed)[:160]
-    return _fail(err) if "error" in refreshed else _ok("Threads token still accepted")
-
-
 def repair_x() -> dict:
     import hashlib
 
@@ -316,7 +296,6 @@ REPAIRERS = (
     ("snapchat", repair_snapchat),
     ("facebook", repair_meta),
     ("instagram", repair_instagram),
-    ("threads", repair_threads),
     ("x", repair_x),
     ("telegram", repair_telegram),
     ("printify", repair_printify),

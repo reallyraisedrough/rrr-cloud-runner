@@ -60,6 +60,20 @@ QUEUE_CATALOG = (
     ("telegram", "image"),
 )
 
+# Every platform that can publish from this worker also gets a Telegram
+# confirmation after a successful post. Keep Snapchat here explicitly so a
+# new Snapchat slot cannot be posted without the matching notification route.
+TELEGRAM_NOTIFICATION_PLATFORMS = (
+    "facebook",
+    "instagram",
+    "threads",
+    "youtube",
+    "x",
+    "telegram",
+    "tiktok",
+    "snapchat",
+)
+
 PLATFORMS = (
     "facebook",
     "instagram",
@@ -854,6 +868,9 @@ def notify_telegram_post(
     at: str,
 ) -> str:
     """Send a best-effort Telegram confirmation after a real platform post."""
+    normalized_platform = str(platform or "").strip().lower()
+    if normalized_platform not in TELEGRAM_NOTIFICATION_PLATFORMS:
+        return "skipped_unsupported_platform"
     token = _env("TELEGRAM_BOT_TOKEN")
     chats = [
         value
@@ -864,7 +881,7 @@ def notify_telegram_post(
     ]
     if not token or not chats:
         return "skipped_no_telegram"
-    label = (platform or "unknown").replace("_", " ").title()
+    label = normalized_platform.replace("_", " ").title()
     message = (
         "✅ RRR post published\n"
         f"Platform: {label}\n"

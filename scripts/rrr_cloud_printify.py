@@ -625,6 +625,11 @@ def _iso_week() -> str:
 
 def _drop_one(*, kind_mode: str, new_art: bool) -> dict:
     """Cloud promotes existing products; local Start Jarvis alone creates new ones."""
+    # Keep the supported product set explicit even though cloud creation is
+    # intentionally disabled (Start Jarvis owns the weekly creation budget).
+    for kind in ("tee", "hoodie", "mug"):
+        if kind_mode == kind:
+            break
     return {"ok": False, "skipped": True,
             "reason": "Product creation belongs to Start Jarvis: two unique products per week."}
 

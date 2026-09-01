@@ -153,6 +153,23 @@ def _success(result) -> bool:
     return text == "ok" or text.startswith("ok:") or text.startswith("posted")
 
 
+PERMANENT_SKIP_RESULTS = frozenset(
+    {
+        "skipped_no_snapchat",
+        "skipped_no_snapchat_profile",
+        "skipped_no_snapchat_media",
+        "skipped_snapchat_not_allowlisted",
+    }
+)
+
+
+def _permanent_skip(result) -> bool:
+    if isinstance(result, dict):
+        result = result.get("result") or result.get("status") or result.get("detail") or ""
+    text = str(result or "").strip().lower()
+    return text in PERMANENT_SKIP_RESULTS or any(text.startswith(item + ":") for item in PERMANENT_SKIP_RESULTS)
+
+
 def _platform_ready(plat: str) -> bool:
     """TikTok/Snapchat wait until grants exist so they do not hog due slots."""
     plat = (plat or "").lower()
@@ -188,7 +205,7 @@ def due_slots(pack: dict, fired: dict, clock: dict) -> list[dict]:
             continue
         key = _run_key(slot, clock)
         entry = fired.get(key)
-        if is_success(entry) or is_held(entry):
+        if is_success(entry) or is_held(entry) or _permanent_skip(entry):
             continue
         if slot.get("last_fired_key") == key and _success(slot.get("last_result")):
             continue
@@ -668,9 +685,13 @@ def _form(url: str, fields: dict, timeout: int = 40, headers: dict | None = None
                 time.sleep(min(12, 1.5 * (2 ** attempt)))
                 continue
             try:
-                return json.loads(raw)
+                payload = json.loads(raw)
+                if isinstance(payload, dict):
+                    payload.setdefault("http_status", exc.code)
+                    return payload
+                return {"error": str(payload)[:240], "http_status": exc.code}
             except Exception:
-                return {"error": raw or str(exc)}
+                return {"error": raw or f"HTTP {exc.code}", "http_status": exc.code}
         except Exception as exc:
             if attempt < 3 and _retryable_network(exc):
                 time.sleep(min(8, 1.0 * (2 ** attempt)))
@@ -710,9 +731,13 @@ def _multipart(url: str, fields: dict[str, str], files: list[tuple[str, str, byt
                 time.sleep(min(15, 2.0 * (2 ** attempt)))
                 continue
             try:
-                return json.loads(raw)
+                payload = json.loads(raw)
+                if isinstance(payload, dict):
+                    payload.setdefault("http_status", exc.code)
+                    return payload
+                return {"error": str(payload)[:240], "http_status": exc.code}
             except Exception:
-                return {"error": raw or str(exc)}
+                return {"error": raw or f"HTTP {exc.code}", "http_status": exc.code}
         except Exception as exc:
             if attempt < 3 and _retryable_network(exc):
                 time.sleep(min(10, 1.5 * (2 ** attempt)))
@@ -1292,6 +1317,27 @@ def _snapchat_token() -> str:
     return str(payload.get("access_token") or "")
 
 
+def _snapchat_not_allowlisted(payload: object) -> bool:
+    """Return true for the stable Public Profile API capability denial.
+
+    Snapchat returns either a blank HTTP 403 or an AUTHORIZATION_PERMISSION_DENIED
+    payload when an OAuth app is not allowlisted. Treat that as a permanent
+    scheduler skip so a due slot is not retried (and logged as a failure) forever.
+    """
+    if isinstance(payload, dict):
+        if str(payload.get("http_status") or "") == "403":
+            return True
+        text = " ".join(str(payload.get(k) or "") for k in ("error", "debug_message", "display_message", "error_code"))
+    else:
+        text = str(payload or "")
+    low = text.lower()
+    return (
+        "authorization_permission_denied" in low
+        or "not allowlisted" in low
+        or ("allowlist" in low and "denied" in low)
+    )
+
+
 def post_snapchat(media: Path, caption: str, *, is_video: bool) -> str:
     token = _snapchat_token()
     if not token:
@@ -1303,6 +1349,12 @@ def post_snapchat(media: Path, caption: str, *, is_video: bool) -> str:
     except Exception:
         return "skipped_no_cryptography"
     profile = _env("SNAPCHAT_PUBLIC_PROFILE_ID")
+    # The profile UUID is public metadata, not a credential. Keep a checked-in
+    # fallback for the RRR Business Profile so an old Actions secret cannot
+    # silently point the scheduler at the Developer Portal app UUID.
+    profile_fallback = _env("SNAPCHAT_PUBLIC_PROFILE_ID_FALLBACK")
+    if profile_fallback:
+        profile = profile_fallback
     if not profile:
         try:
             req = urllib.request.Request(
@@ -1341,6 +1393,8 @@ def post_snapchat(media: Path, caption: str, *, is_video: bool) -> str:
         token=token,
         method="POST",
     )
+    if _snapchat_not_allowlisted(created):
+        return "skipped_snapchat_not_allowlisted"
     if str(created.get("request_status") or "").upper() != "SUCCESS":
         return f"failed:{created}"[:160]
     media_id = str(created.get("media_id") or "")
@@ -1355,6 +1409,8 @@ def post_snapchat(media: Path, caption: str, *, is_video: bool) -> str:
         timeout=300,
         headers={"Authorization": f"Bearer {token}"},
     )
+    if _snapchat_not_allowlisted(uploaded):
+        return "skipped_snapchat_not_allowlisted"
     if str(uploaded.get("request_status") or uploaded.get("error") or "").lower() not in (
         "",
         "success",
@@ -1370,6 +1426,10 @@ def post_snapchat(media: Path, caption: str, *, is_video: bool) -> str:
     try:
         with urllib.request.urlopen(fin_req, timeout=120) as resp:
             json.loads(resp.read().decode("utf-8", errors="replace") or "{}")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            return "skipped_snapchat_not_allowlisted"
+        return f"failed:Snapchat finalize HTTP {exc.code}"[:160]
     except Exception as exc:
         return f"failed:{exc}"[:160]
     endpoint = "spotlights" if is_video else "stories"
@@ -1384,6 +1444,8 @@ def post_snapchat(media: Path, caption: str, *, is_video: bool) -> str:
         token=token,
         method="POST",
     )
+    if _snapchat_not_allowlisted(posted):
+        return "skipped_snapchat_not_allowlisted"
     if str(posted.get("request_status") or "").upper() != "SUCCESS":
         return f"failed:{posted}"[:160]
     ident = posted.get("spotlight_id") or posted.get("story_id") or media_id
@@ -1403,9 +1465,13 @@ def _form_json(url: str, body: dict, *, token: str = "", method: str = "POST") -
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")[:300]
         try:
-            return json.loads(raw)
+            payload = json.loads(raw)
+            if isinstance(payload, dict):
+                payload.setdefault("http_status", exc.code)
+                return payload
+            return {"error": str(payload)[:240], "http_status": exc.code}
         except Exception:
-            return {"error": raw or str(exc)}
+            return {"error": raw or f"HTTP {exc.code}", "http_status": exc.code}
     except Exception as exc:
         return {"error": str(exc)[:200]}
 

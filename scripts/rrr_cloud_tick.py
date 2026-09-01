@@ -1,6 +1,6 @@
 """Laptop-off poster. Uses the RRR social_schedule.json slots.
 
-Platforms: facebook, instagram, threads, youtube, x, telegram, tiktok, snapchat.
+Platforms: facebook, instagram, youtube, x, telegram, tiktok, snapchat.
 Post types: image, photo, post, text, reel, video, short.
 Custom X = OAuth 1.0a from env / Desktop\\x keys.txt (free forever, no paid credits).
 YouTube = refresh token + video upload.
@@ -52,7 +52,6 @@ QUEUE_CATALOG = (
     ("facebook", "reel"),
     ("instagram", "image"),
     ("instagram", "reel"),
-    ("threads", "image"),
     ("youtube", "short"),
     ("youtube", "video"),
     ("x", "image"),
@@ -66,7 +65,6 @@ QUEUE_CATALOG = (
 TELEGRAM_NOTIFICATION_PLATFORMS = (
     "facebook",
     "instagram",
-    "threads",
     "youtube",
     "x",
     "telegram",
@@ -77,7 +75,6 @@ TELEGRAM_NOTIFICATION_PLATFORMS = (
 PLATFORMS = (
     "facebook",
     "instagram",
-    "threads",
     "youtube",
     "x",
     "telegram",
@@ -338,7 +335,6 @@ PRINTIFY_STORE = "https://really-raised-rough.printify.me"
 _PLATFORM_MATCH = {
     "facebook": "{title} on this {kind} — Facebook write-up for that exact design.",
     "instagram": "IG: {title} printed on this {kind}. Title matches the graphic.",
-    "threads": "Threads drop: {title} {kind}. Same words as the print.",
     "youtube": "This video is the {title} {kind}. Title, design, and checkout are the same piece.",
     "x": "{title} {kind}. Same design as the title.",
     "telegram": "RRR channel: {title} {kind}. Title matches the print.",
@@ -383,8 +379,6 @@ def order_caption(product: dict, platform: str, *, humor: str = "", post_type: s
     shops = f"{COM_STORE}\n{PRINTIFY_STORE}"
     if plat == "x":
         return f"{title} {kind}\n{match}\n{url}\n{COM_STORE}\n{PRINTIFY_STORE}"[:275]
-    if plat == "threads":
-        return f"{match}\n🛒 ORDER NOW:\n{url}\n{shops}"[:500]
     if plat == "youtube":
         return (
             f"{title} | Really Raised Rough {kind}\n\n"
@@ -396,7 +390,6 @@ def order_caption(product: dict, platform: str, *, humor: str = "", post_type: s
             f"Shop: {PRINTIFY_STORE}\n\n"
             "Follow Really Raised Rough:\n"
             "Instagram https://www.instagram.com/reallyraisedrough\n"
-            "Threads https://www.threads.net/@reallyraisedrough\n"
             "YouTube https://www.youtube.com/@ReallyRRough\n"
             "X https://x.com/RRough10304\n"
             "Telegram https://t.me/ReallyRaisedRough\n"
@@ -802,23 +795,6 @@ def post_instagram_reel(video: Path, caption: str) -> str:
     except Exception as exc:
         return f"failed:{exc}"[:160]
     published = _form(f"{GRAPH}/{ig}/media_publish", {"creation_id": creation_id, "access_token": token})
-    return f"ok:{published.get('id')}" if published.get("id") else f"failed:{str(published)[:160]}"
-
-
-def post_threads_image(image: str, caption: str) -> str:
-    token, uid = _env("META_THREADS_ACCESS_TOKEN"), _env("META_THREADS_USER_ID")
-    if not token or not uid:
-        return "skipped_no_threads"
-    fields = {"media_type": "IMAGE" if image else "TEXT", "text": caption[:500], "access_token": token}
-    if image:
-        fields["image_url"] = image
-    created = _form(f"https://graph.threads.net/v1.0/{uid}/threads", fields)
-    if not created.get("id"):
-        return f"failed:{str(created)[:160]}"
-    published = _form(
-        f"https://graph.threads.net/v1.0/{uid}/threads_publish",
-        {"creation_id": created["id"], "access_token": token},
-    )
     return f"ok:{published.get('id')}" if published.get("id") else f"failed:{str(published)[:160]}"
 
 
@@ -1469,8 +1445,6 @@ def execute_slot(slot: dict, pack: dict, work: Path, clock: dict | None = None) 
             if ptype in IMAGE_TYPES or not video_path:
                 return post_instagram_image(image_url, cap)
             return post_instagram_reel(video_path, cap)
-        if plat == "threads":
-            return post_threads_image(image_url, cap)
         if plat == "telegram":
             if video_path:
                 return post_telegram_video(video_path, cap)

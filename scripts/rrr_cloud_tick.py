@@ -116,6 +116,10 @@ def _env(key: str) -> str:
 def _load(path: Path, fallback):
     if not path.is_file():
         return fallback
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return fallback
 
 
 def _load_effective_pack() -> dict:
@@ -140,10 +144,6 @@ def _load_effective_pack() -> dict:
         merged.setdefault("source", "local_schedule_fallback")
         return merged
     return pack
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return fallback
 
 
 def _save(path: Path, data) -> None:

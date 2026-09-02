@@ -15,9 +15,11 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(os.getenv("RRR_PACK_DIR") or Path.cwd())
-OWNER = os.getenv("RRR_PACK_OWNER") or "reallyraisedrough"
-if OWNER.lower() == "iammrzam":
-    OWNER = "reallyraisedrough"
+BRAND_OWNER = "reallyraisedrough"
+OWNER = (os.getenv("RRR_PACK_OWNER") or BRAND_OWNER).strip() or BRAND_OWNER
+# Never let an old IamMrZam override redirect cloud state to the wrong account.
+if OWNER.lower() != BRAND_OWNER:
+    OWNER = BRAND_OWNER
 PACK_REPO = os.getenv("RRR_PACK_REPO") or "rrr-always-on"
 BRANCH = os.getenv("RRR_PACK_BRANCH") or "main"
 FILES = (

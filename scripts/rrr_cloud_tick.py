@@ -1545,7 +1545,30 @@ def execute_slot(slot: dict, pack: dict, work: Path, clock: dict | None = None) 
             title = str(product.get("product_title") or "Really Raised Rough")[:80]
             if "reallyraisedrough.com" not in title.lower():
                 title = f"{title} | reallyraisedrough.com"
-            return post_youtube(video_path or Path(), title, cap, is_short=(ptype != "video"))
+            result = post_youtube(video_path or Path(), title, cap, is_short=(ptype != "video"))
+            if _success(result):
+                # The cloud worker's video lives in a temporary directory, so
+                # persist the product/caption and let the mirror rebuild media
+                # from the checked-in marketing pool when Snapchat is approved.
+                try:
+                    from app.snapchat_youtube_mirror import enqueue_youtube_post
+
+                    enqueue_youtube_post(
+                        {
+                            "platform": "youtube",
+                            "post_type": ptype,
+                            "product_title": product.get("product_title", ""),
+                            "product_url": product.get("product_url", ""),
+                            "result": result,
+                            "slot_id": slot.get("id", ""),
+                            "timestamp": clock.get("iso", ""),
+                        },
+                        caption=cap,
+                        youtube_title=title,
+                    )
+                except Exception:
+                    pass
+            return result
         if plat == "tiktok":
             if not video_path:
                 return "skipped_no_tiktok_video"
@@ -1697,6 +1720,18 @@ def run() -> dict:
                     "telegram_notification": notification,
                 }
             )
+    mirror_summary: dict[str, object] = {"status": "dry_run" if DRY else "not_run"}
+    if not DRY:
+        try:
+            from app.snapchat_youtube_mirror import drain_pending, sync_from_youtube_history
+
+            mirror_sync = sync_from_youtube_history()
+            mirror_drain = drain_pending()
+            mirror_summary = {"sync": mirror_sync, "drain": mirror_drain}
+        except Exception as exc:  # noqa: BLE001
+            # Snapchat is an optional, allowlist-gated mirror.  Never turn a
+            # successful YouTube/social tick red because its queue is offline.
+            mirror_summary = {"status": "skipped", "detail": str(exc)[:200]}
     if not DRY:
         _save(PACK_PATH, pack)
         _save(FIRED_PATH, fired)
@@ -1718,6 +1753,7 @@ def run() -> dict:
         "x_mode": "oauth1_free",
         "controls": "Start Jarvis",
         "dry": DRY,
+        "snapchat_youtube_mirror": mirror_summary,
     }
     print(json.dumps(summary, indent=2))
     return summary

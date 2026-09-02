@@ -434,6 +434,8 @@ def order_caption(product: dict, platform: str, *, humor: str = "", post_type: s
             "YouTube https://www.youtube.com/@ReallyRRough\n"
             "X https://x.com/RRough10304\n"
             "Telegram https://t.me/ReallyRaisedRough\n"
+            "Snapchat https://www.snapchat.com/add/reallyraisedrough\n"
+            "TikTok https://www.tiktok.com/@reallyraisedrough\n"
         )
     return (
         f"{title}\n"
@@ -466,6 +468,84 @@ def _pick(pack: dict, slot: dict | None = None, clock: dict | None = None) -> di
         )
         return posts[idx]
     return random.choice(posts)
+
+
+def _video_library_entries(pack: dict) -> list[dict]:
+    library = pack.get("video_library") if isinstance(pack, dict) else None
+    raw = library.get("files") if isinstance(library, dict) else []
+    out: list[dict] = []
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        rel = str(item.get("path") or "").strip().replace("\\", "/")
+        filename = str(item.get("filename") or "").strip()
+        candidates: list[Path] = []
+        if rel:
+            path = Path(rel)
+            candidates.append(path if path.is_absolute() else ROOT / path)
+        if filename:
+            candidates.append(ROOT / "media" / "videos" / filename)
+            configured = _env("RRR_VIDEO_LIBRARY_DIR")
+            if configured:
+                candidates.append(Path(configured) / filename)
+        path = next((candidate for candidate in candidates if candidate.is_file()), None)
+        if not path:
+            continue
+        row = dict(item)
+        row["id"] = str(item.get("id") or filename or path.name)
+        row["path"] = str(path)
+        out.append(row)
+    return out
+
+
+def _video_history(fired: dict, platform: str) -> list[dict]:
+    history: list[dict] = []
+    for entry in (fired or {}).values():
+        if not isinstance(entry, dict) or not _success(entry):
+            continue
+        if str(entry.get("platform") or "").lower() != platform:
+            continue
+        video_id = str(entry.get("video_id") or "").strip()
+        if not video_id:
+            continue
+        try:
+            cycle = int(entry.get("video_cycle"))
+        except (TypeError, ValueError):
+            cycle = -1
+        history.append({"video_id": video_id, "cycle": cycle, "at": str(entry.get("at") or "")})
+    history.sort(key=lambda row: row.get("at") or "")
+    return history
+
+
+def _next_library_video(pack: dict, platform: str, fired: dict) -> dict | None:
+    """Pick a random-looking file without repeating per platform.
+
+    Assignments are recorded in fired.json only after a successful post.  That
+    keeps failed uploads retryable and makes the rotation durable across the
+    stateless GitHub runner without another mutable state file.
+    """
+    entries = _video_library_entries(pack)
+    if not entries:
+        return None
+    history = _video_history(fired, platform)
+    known_cycles = [row["cycle"] for row in history if row["cycle"] >= 0]
+    if known_cycles:
+        cycle = max(known_cycles)
+        used = {row["video_id"] for row in history if row["cycle"] == cycle}
+    else:
+        cycle = len(history) // len(entries)
+        used = {row["video_id"] for row in history[-len(entries):]}
+    if len(used) >= len(entries):
+        cycle += 1
+        used = set()
+    order = list(entries)
+    random.Random(f"rrr-video:{platform}:{cycle}").shuffle(order)
+    selected = next((item for item in order if str(item.get("id")) not in used), order[0])
+    return {
+        "id": str(selected.get("id")),
+        "path": Path(str(selected.get("path"))),
+        "cycle": cycle,
+    }
 
 
 def _needs_video(slot: dict) -> bool:
@@ -1500,7 +1580,13 @@ def _form_json(url: str, body: dict, *, token: str = "", method: str = "POST") -
         return {"error": str(exc)[:200]}
 
 
-def execute_slot(slot: dict, pack: dict, work: Path, clock: dict | None = None) -> str:
+def execute_slot(
+    slot: dict,
+    pack: dict,
+    work: Path,
+    clock: dict | None = None,
+    video_selection: dict | None = None,
+) -> str:
     plat = str(slot.get("platform") or "").lower()
     ptype = str(slot.get("post_type") or "image").lower()
     clock = clock or _clock()
@@ -1515,7 +1601,9 @@ def execute_slot(slot: dict, pack: dict, work: Path, clock: dict | None = None) 
         image_path = _download(image_url, work / "post.jpg")
     video_path = None
     if _needs_video(slot):
-        if image_path:
+        if video_selection and Path(video_selection.get("path") or "").is_file():
+            video_path = Path(video_selection["path"])
+        elif image_path:
             seconds = _duration(slot)
             audio = None
             cfg = dict(_voice_cfg())
@@ -1632,9 +1720,10 @@ def run() -> dict:
         work = Path(tmp)
         for slot in claimed:
             humor = humor_for(slot, clock)
-            result = execute_slot(slot, pack, work, clock)
-            key = _run_key(slot, clock)
             plat = str(slot.get("platform") or "").lower()
+            video_selection = _next_library_video(pack, plat, fired) if _needs_video(slot) else None
+            result = execute_slot(slot, pack, work, clock, video_selection=video_selection)
+            key = _run_key(slot, clock)
             slot["last_run_at"] = clock["iso"]
             slot["last_result"] = result[:400]
             slot["last_humor"] = humor
@@ -1647,7 +1736,18 @@ def run() -> dict:
                 key,
                 result,
                 now_iso=clock["iso"],
-                extra={"platform": plat, "humor": humor},
+                extra={
+                    "platform": plat,
+                    "humor": humor,
+                    **(
+                        {
+                            "video_id": video_selection.get("id"),
+                            "video_cycle": video_selection.get("cycle"),
+                        }
+                        if video_selection
+                        else {}
+                    ),
+                },
             )
             if _success(result):
                 slot["last_fired_key"] = key

@@ -27,6 +27,10 @@ except Exception:  # pragma: no cover
     ZoneInfo = None  # type: ignore
 
 ROOT = Path(__file__).resolve().parent.parent
+try:
+    from rrr_designer_controls import load_design_controls
+except ModuleNotFoundError:  # imported by a test/module loader from repo root
+    from scripts.rrr_designer_controls import load_design_controls
 PACK_PATH = Path(os.getenv("RRR_PACK_PATH") or (ROOT / "pack.json"))
 STATE_PATH = Path(os.getenv("RRR_PRINTIFY_STATE") or (ROOT / "printify_drop_state.json"))
 STORE = "https://really-raised-rough.printify.me"
@@ -636,6 +640,11 @@ def _drop_one(*, kind_mode: str, new_art: bool) -> dict:
 
 def create_daily_set() -> dict:
     """1 existing (used art) + 1 new design per ISO week. Hosts split leftover slots."""
+    controls = load_design_controls(pack_path=PACK_PATH)
+    if not controls["enabled"]:
+        return {"skipped": True, "reason": "designer_disabled_by_hub", "controls": controls}
+    if controls["preview_only"]:
+        return {"skipped": True, "reason": "designer_preview_only", "controls": controls}
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from rrr_slot_lock import HOST_ID, claim, finish, is_held, is_success
 
@@ -680,6 +689,7 @@ def run() -> dict:
         summary = {"ok": False, "error": "PRINTIFY_API_TOKEN missing"}
         print(json.dumps(summary))
         return summary
+    controls = load_design_controls(pack_path=PACK_PATH)
     drop = {}
     try:
         drop = create_daily_set()
@@ -701,6 +711,7 @@ def run() -> dict:
         "repaired": repaired,
         "mockups_in_pack": synced,
         "shop_configured": bool(_env("PRINTIFY_SHOP_ID") or True),
+        "designer_controls": controls,
     }
     print(json.dumps(summary, indent=2))
     return summary

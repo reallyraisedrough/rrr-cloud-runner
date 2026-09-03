@@ -93,7 +93,7 @@ def repair_tiktok() -> dict:
     key, secret, refresh = _env("TIKTOK_CLIENT_KEY"), _env("TIKTOK_CLIENT_SECRET"), _env("TIKTOK_REFRESH_TOKEN")
     if not (key and secret and refresh):
         if _env("TIKTOK_ACCESS_TOKEN"):
-            return _ok("access token present")
+            return _fail("access token present but refresh token missing")
         return _fail("not configured")
     payload = _form(
         "https://open.tiktokapis.com/v2/oauth/token/",

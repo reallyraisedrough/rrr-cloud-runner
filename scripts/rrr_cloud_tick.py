@@ -932,7 +932,11 @@ def post_instagram_reel(video: Path, caption: str) -> str:
 
 def post_telegram_image(image: str, caption: str) -> str:
     token = _env("TELEGRAM_BOT_TOKEN")
-    chats = [x for x in (_env("TELEGRAM_MARKETING_CHAT_IDS") or _env("TELEGRAM_CHAT_IDS")).replace(",", " ").split() if x]
+    # Scheduled/product content belongs in the public channel, never the
+    # private operational notification chat. Override the default handle with
+    # TELEGRAM_PUBLIC_CHAT_IDS when the channel uses a numeric id or another
+    # username.
+    chats = [x for x in (_env("TELEGRAM_PUBLIC_CHAT_IDS") or "@ReallyRaisedRough").replace(",", " ").split() if x]
     if not token or not chats:
         return "skipped_no_telegram"
     last = "failed"
@@ -953,7 +957,7 @@ def post_telegram_image(image: str, caption: str) -> str:
 
 def post_telegram_video(video: Path, caption: str) -> str:
     token = _env("TELEGRAM_BOT_TOKEN")
-    chats = [x for x in (_env("TELEGRAM_MARKETING_CHAT_IDS") or _env("TELEGRAM_CHAT_IDS")).replace(",", " ").split() if x]
+    chats = [x for x in (_env("TELEGRAM_PUBLIC_CHAT_IDS") or "@ReallyRaisedRough").replace(",", " ").split() if x]
     if not token or not chats or not video.is_file():
         return "skipped_no_telegram"
     last = "failed"
@@ -980,9 +984,16 @@ def notify_telegram_post(
     if normalized_platform not in TELEGRAM_NOTIFICATION_PLATFORMS:
         return "skipped_unsupported_platform"
     token = _env("TELEGRAM_BOT_TOKEN")
+    # Notifications stay private. Keep the old marketing variable as a final
+    # compatibility fallback for existing workflows that have not yet added
+    # TELEGRAM_CHAT_IDS.
     chats = [
         value
-        for value in (_env("TELEGRAM_MARKETING_CHAT_IDS") or _env("TELEGRAM_CHAT_IDS"))
+        for value in (
+            _env("TELEGRAM_NOTIFICATION_CHAT_IDS")
+            or _env("TELEGRAM_CHAT_IDS")
+            or _env("TELEGRAM_MARKETING_CHAT_IDS")
+        )
         .replace(",", " ")
         .split()
         if value

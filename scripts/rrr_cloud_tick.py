@@ -258,7 +258,8 @@ def queue_on(pack: dict) -> bool:
 
 
 def _new_queue_job(*, created: int = 0, design_every: int = 6) -> dict:
-    plat, ptype = random.choice(QUEUE_CATALOG)
+    catalog = tuple(item for item in QUEUE_CATALOG if not (X_MANUAL_ONLY and item[0] == "x"))
+    plat, ptype = random.choice(catalog or (("facebook", "image"),))
     video = ptype in VIDEO_TYPES
     kind = "design" if created and created % max(1, design_every) == 0 else "post"
     return {
@@ -333,6 +334,8 @@ def execute_queue_job(job: dict, pack: dict, work: Path, clock: dict) -> str:
         "batch": "unlimited-queue",
     }
     plat = str(slot["platform"]).lower()
+    if plat == "x" and X_MANUAL_ONLY:
+        return "queued_manual_x: use native x.com scheduler"
     if not _platform_ready(plat):
         return "skipped_platform_not_ready"
     return execute_slot(slot, pack, work, clock)

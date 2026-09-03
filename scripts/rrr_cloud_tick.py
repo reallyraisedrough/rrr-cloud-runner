@@ -46,6 +46,7 @@ DRY = (os.getenv("RRR_DRY_RUN") or "").strip().lower() in ("1", "true", "yes", "
 # X website posting remains available manually; API automation is opt-in.
 X_MANUAL_ONLY = (os.getenv("RRR_X_MANUAL_ONLY", "true") or "true").strip().lower() in ("1", "true", "yes", "on")
 MAX_DUE = 12
+from rrr_designer_controls import load_design_controls, normalize_design_controls
 _PRODUCT_RE = re.compile(r"/product/(\d+)(?:/([^/?#\s]+))?", re.I)
 QUEUE_CATALOG = (
     ("facebook", "image"),
@@ -306,6 +307,12 @@ def drain_pack_queue(pack: dict, *, n: int | None = None) -> list[dict]:
 def execute_queue_job(job: dict, pack: dict, work: Path, clock: dict) -> str:
     kind = str(job.get("kind") or "post").lower()
     if kind == "design":
+        raw_controls = pack.get("designer_controls") if isinstance(pack, dict) else None
+        controls = normalize_design_controls(raw_controls) if isinstance(raw_controls, dict) else load_design_controls(pack_path=PACK_PATH)
+        if not controls["enabled"]:
+            return "skipped:designer_disabled_by_hub"
+        if controls["preview_only"]:
+            return "skipped:designer_preview_only"
         try:
             import rrr_cloud_printify
 

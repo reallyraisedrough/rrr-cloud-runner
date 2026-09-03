@@ -109,6 +109,33 @@ HUMOR_HOOKS = {
     "sarcastic": "Congrats on surviving yourself. Here's a shirt about it.",
 }
 
+# Short, original one-liners used by video posts.  They are intentionally
+# separate from the product copy so a title/product can recur without making
+# the full social description recur.  The selected line is recorded in
+# fired.json after a successful post and skipped on later runs.
+VIDEO_DESCRIPTION_VARIATIONS = (
+    "A little timeline chaos, a lot of personality for the cart.",
+    "The clip brings the joke; the shop brings the size and color.",
+    "Proof that a rough day can still have excellent merch.",
+    "Funny on the feed, surprisingly serious about checkout.",
+    "Built for the group chat and the real-world rotation.",
+    "No lecture in this clip, just a design with good timing.",
+    "The punchline landed. Now let the outfit do the talking.",
+    "A quick laugh, a clean link, and a design worth keeping.",
+    "For survivors, smart mouths, and anyone allergic to boring fits.",
+    "This is your sign to retire the plain shirt, boss.",
+    "The algorithm can keep the noise; this one keeps the character.",
+    "A funny little drop with a very real checkout button.",
+    "Wear the evidence that you made it through another week.",
+    "Scroll-stopping attitude, responsibly shipped.",
+    "One video, one joke, one more reason to check the store.",
+    "A rough edge, a clean print, and zero beige energy.",
+    "The design has jokes; your old wardrobe has questions.",
+    "Keep the clip, lose the excuses, pick your size.",
+    "A fresh laugh for the feed and a fresh piece for the rotation.",
+    "Not a stock caption — this drop showed up with its own punchline.",
+)
+
 
 def _env(key: str) -> str:
     return (os.getenv(key) or "").strip()
@@ -304,7 +331,14 @@ def drain_pack_queue(pack: dict, *, n: int | None = None) -> list[dict]:
     return jobs
 
 
-def execute_queue_job(job: dict, pack: dict, work: Path, clock: dict) -> str:
+def execute_queue_job(
+    job: dict,
+    pack: dict,
+    work: Path,
+    clock: dict,
+    *,
+    fired: dict | None = None,
+) -> str:
     kind = str(job.get("kind") or "post").lower()
     if kind == "design":
         raw_controls = pack.get("designer_controls") if isinstance(pack, dict) else None
@@ -345,7 +379,10 @@ def execute_queue_job(job: dict, pack: dict, work: Path, clock: dict) -> str:
         return "queued_manual_x: use native x.com scheduler"
     if not _platform_ready(plat):
         return "skipped_platform_not_ready"
-    return execute_slot(slot, pack, work, clock)
+    result = execute_slot(slot, pack, work, clock, fired=fired)
+    if "_last_caption" in slot:
+        job["_last_caption"] = slot.pop("_last_caption")
+    return result
 
 
 def checkout_url(raw: str) -> str:
@@ -413,7 +450,14 @@ def _kind_from_title(title: str, product: dict | None = None) -> str:
     return "piece"
 
 
-def order_caption(product: dict, platform: str, *, humor: str = "", post_type: str = "image") -> str:
+def order_caption(
+    product: dict,
+    platform: str,
+    *,
+    humor: str = "",
+    post_type: str = "image",
+    variation: str = "",
+) -> str:
     title = re.sub(
         r"\s*[|\-—].*$",
         "",
@@ -428,12 +472,15 @@ def order_caption(product: dict, platform: str, *, humor: str = "", post_type: s
     hook = HUMOR_HOOKS.get(humor, HUMOR_HOOKS["dark_humor"]) if humor else HUMOR_HOOKS["dark_humor"]
     match = _PLATFORM_MATCH.get(plat, _PLATFORM_MATCH["facebook"]).format(title=title, kind=kind)
     shops = f"{COM_STORE}\n{PRINTIFY_STORE}"
+    fresh_line = str(variation or "").strip()
     if plat == "x":
-        return f"{title} {kind}\n{match}\n{url}\n{COM_STORE}\n{PRINTIFY_STORE}"[:275]
+        extra = f"\n{fresh_line}" if fresh_line else ""
+        return f"{title} {kind}\n{match}{extra}\n{url}\n{COM_STORE}\n{PRINTIFY_STORE}"[:275]
     if plat == "youtube":
         return (
             f"{title} | Really Raised Rough {kind}\n\n"
             f"{hook}\n"
+            f"{fresh_line + chr(10) if fresh_line else ''}"
             f"{match}\n\n"
             f"🛒 ORDER NOW — pick size, color, enter address, checkout:\n{url}\n"
             f"{com_url}\n"
@@ -450,6 +497,7 @@ def order_caption(product: dict, platform: str, *, humor: str = "", post_type: s
     return (
         f"{title}\n"
         f"{hook}\n"
+        f"{fresh_line + chr(10) if fresh_line else ''}"
         f"{match}\n"
         f"This {ptype} is the {title} {kind} — the description matches the design.\n"
         f"🛒 ORDER NOW — pick size, color, enter address, checkout:\n{url}\n"
@@ -458,6 +506,73 @@ def order_caption(product: dict, platform: str, *, humor: str = "", post_type: s
         f"Shop: {PRINTIFY_STORE}\n"
         f"#reallyraisedrough #soberlife #recovery"
     )[:1800]
+
+
+def _caption_key(value: str) -> str:
+    """Normalize captions for exact duplicate detection across workers."""
+    return re.sub(r"\s+", " ", str(value or "")).strip().casefold()
+
+
+def _caption_history(fired: dict | None) -> set[str]:
+    """Return captions from successful posts recorded in fired.json."""
+    used: set[str] = set()
+    for entry in (fired or {}).values():
+        if not isinstance(entry, dict) or not _success(entry):
+            continue
+        caption = str(entry.get("caption") or entry.get("description") or "").strip()
+        if caption:
+            used.add(_caption_key(caption))
+    return used
+
+
+def unique_order_caption(
+    product: dict,
+    platform: str,
+    *,
+    humor: str = "",
+    post_type: str = "image",
+    fired: dict | None = None,
+    slot: dict | None = None,
+    clock: dict | None = None,
+) -> str:
+    """Build a funny caption that is not an exact repeat of a prior post.
+
+    The seed makes retries deterministic for the same slot/run, while fired
+    history prevents repeats after a successful post on either GitHub runner.
+    """
+    clock = clock or _clock()
+    used = _caption_history(fired)
+    seed = _rotate_index(
+        clock.get("date"),
+        slot.get("id") if isinstance(slot, dict) else "",
+        platform,
+        post_type,
+        size=len(VIDEO_DESCRIPTION_VARIATIONS),
+    )
+    for offset in range(len(VIDEO_DESCRIPTION_VARIATIONS)):
+        variation = VIDEO_DESCRIPTION_VARIATIONS[(seed + offset) % len(VIDEO_DESCRIPTION_VARIATIONS)]
+        candidate = order_caption(
+            product,
+            platform,
+            humor=humor,
+            post_type=post_type,
+            variation=variation if post_type in VIDEO_TYPES else "",
+        )
+        if _caption_key(candidate) not in used:
+            return candidate
+    # Keep the invariant true even after every one-liner has been used.
+    n = len(used) + 1
+    return order_caption(
+        product,
+        platform,
+        humor=humor,
+        post_type=post_type,
+        variation=(
+            f"Fresh drop #{n}: the joke is new, the checkout is ready."
+            if post_type in VIDEO_TYPES
+            else f"Fresh drop #{n}."
+        ),
+    )
 
 
 def _pick(pack: dict, slot: dict | None = None, clock: dict | None = None) -> dict:
@@ -671,6 +786,17 @@ def _humor_script(
     script = f"{openers[idx % len(openers)]} {middles[idx % len(middles)]} {ctas[idx % len(ctas)]}"
     if seconds <= 20:
         script = f"{openers[idx % len(openers)]} {ctas[idx % len(ctas)]}"
+    if persona in {"wiseguy", "enforcer"}:
+        # Original quick, playful wiseguy cadence (not a character imitation):
+        # diction and timing carry the attitude; the selected pitch stays as
+        # configured in voice_settings.json.
+        wiseguy_bits = (
+            "Ya see, boss, the coppers can keep the excuses.",
+            "Listen, pal, this drop has more bite than a back-room deal.",
+            "Capisce? Clean print, sharp joke, no soft targets.",
+            "Boss, we move the good stuff and leave the boring rack behind.",
+        )
+        script = f"{wiseguy_bits[idx % len(wiseguy_bits)]} {script}"
     return re.sub(r"\s+", " ", script).strip()
 
 
@@ -1607,6 +1733,7 @@ def execute_slot(
     work: Path,
     clock: dict | None = None,
     video_selection: dict | None = None,
+    fired: dict | None = None,
 ) -> str:
     plat = str(slot.get("platform") or "").lower()
     ptype = str(slot.get("post_type") or "image").lower()
@@ -1614,7 +1741,19 @@ def execute_slot(
     humor = humor_for(slot, clock)
     product = _pick(pack, slot, clock)
     image_url = str(product.get("image_url") or product.get("image") or "")
-    cap = order_caption(product, plat, humor=humor, post_type=ptype)
+    cap = unique_order_caption(
+        product,
+        plat,
+        humor=humor,
+        post_type=ptype,
+        fired=fired,
+        slot=slot,
+        clock=clock,
+    )
+    # The caller persists the exact caption alongside the fired result. Keep
+    # it on the transient slot object so this function remains backwards
+    # compatible with callers that expect a string result.
+    slot["_last_caption"] = cap
     if DRY:
         return f"dry:{plat}/{ptype}/{humor}"
     image_path = None
@@ -1743,7 +1882,15 @@ def run() -> dict:
             humor = humor_for(slot, clock)
             plat = str(slot.get("platform") or "").lower()
             video_selection = _next_library_video(pack, plat, fired) if _needs_video(slot) else None
-            result = execute_slot(slot, pack, work, clock, video_selection=video_selection)
+            result = execute_slot(
+                slot,
+                pack,
+                work,
+                clock,
+                video_selection=video_selection,
+                fired=fired,
+            )
+            caption = str(slot.pop("_last_caption", ""))
             key = _run_key(slot, clock)
             slot["last_run_at"] = clock["iso"]
             slot["last_result"] = result[:400]
@@ -1760,6 +1907,7 @@ def run() -> dict:
                 extra={
                     "platform": plat,
                     "humor": humor,
+                    "caption": caption,
                     **(
                         {
                             "video_id": video_selection.get("id"),
@@ -1794,8 +1942,9 @@ def run() -> dict:
             )
         for qkey, job in claimed_q:
             humor = humor_for(job, clock)
-            result = execute_queue_job(job, pack, work, clock)
+            result = execute_queue_job(job, pack, work, clock, fired=fired)
             plat = str(job.get("platform") or "").lower()
+            caption = str((job if isinstance(job, dict) else {}).pop("_last_caption", ""))
             if DRY:
                 results.append(
                     {
@@ -1815,7 +1964,12 @@ def run() -> dict:
                 qkey,
                 result,
                 now_iso=clock["iso"],
-                extra={"platform": plat, "humor": humor, "source": "unlimited-queue"},
+                extra={
+                    "platform": plat,
+                    "humor": humor,
+                    "caption": caption,
+                    "source": "unlimited-queue",
+                },
             )
             notification = (
                 notify_telegram_post(

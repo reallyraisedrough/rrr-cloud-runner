@@ -6,11 +6,13 @@ Never prints secret values. Uses GH_PAT.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -29,6 +31,57 @@ FILES = (
     "voice_settings.json",
     "unlimited_post_queue.json",
 )
+
+
+def _pull_video_library(pack: dict) -> list[dict]:
+    """Materialize checked-in video assets for the public runner.
+
+    The private pack contains only metadata.  GitHub's Contents endpoint does
+    not return base64 for files over 1 MiB, so fetch each blob by SHA instead
+    of relying on a raw URL that would not authenticate a private repository.
+    """
+    library = pack.get("video_library") if isinstance(pack, dict) else None
+    files = library.get("files") if isinstance(library, dict) else []
+    if not isinstance(files, list):
+        return []
+    destination = ROOT / "media" / "videos"
+    destination.mkdir(parents=True, exist_ok=True)
+    results: list[dict] = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        filename = Path(str(item.get("filename") or "").strip()).name
+        if not filename or filename != str(item.get("filename") or "").strip():
+            results.append({"file": filename or "?", "ok": False, "error": "unsafe filename"})
+            continue
+        target = destination / filename
+        expected = str(item.get("sha256") or "").strip().lower()
+        if target.is_file() and expected:
+            try:
+                digest = hashlib.sha256(target.read_bytes()).hexdigest().lower()
+                if digest == expected:
+                    results.append({"file": filename, "ok": True, "unchanged": True})
+                    continue
+            except OSError:
+                pass
+        rel = f"media/videos/{filename}"
+        meta = _req("GET", f"/repos/{OWNER}/{PACK_REPO}/contents/{urllib.parse.quote(rel, safe='/')}?ref={BRANCH}")
+        sha = str(meta.get("sha") or "").strip()
+        if not sha:
+            results.append({"file": filename, "ok": False, "error": meta.get("error") or "missing metadata"})
+            continue
+        blob = _req("GET", f"/repos/{OWNER}/{PACK_REPO}/git/blobs/{sha}")
+        encoded = blob.get("content") if isinstance(blob, dict) else None
+        if not encoded:
+            results.append({"file": filename, "ok": False, "error": blob.get("error") or "missing blob"})
+            continue
+        try:
+            raw = base64.b64decode(str(encoded), validate=False)
+            target.write_bytes(raw)
+            results.append({"file": filename, "ok": target.is_file(), "bytes": len(raw)})
+        except Exception as exc:  # noqa: BLE001
+            results.append({"file": filename, "ok": False, "error": str(exc)[:120]})
+    return results
 
 
 def _token() -> str:
@@ -75,6 +128,17 @@ def pull() -> dict:
         raw = base64.b64decode(payload["content"])
         (ROOT / name).write_bytes(raw)
         out.append({"file": name, "ok": True, "bytes": len(raw)})
+    # The public runner checks out a separate repository.  Pull the private
+    # pack's video blobs into its local media/videos directory so scheduled
+    # posts use the same Desktop library and shuffle-without-repeat state.
+    media = []
+    try:
+        pack = json.loads((ROOT / "pack.json").read_text(encoding="utf-8"))
+        media = _pull_video_library(pack)
+    except Exception as exc:  # noqa: BLE001
+        media = [{"ok": False, "error": str(exc)[:120]}]
+    if media:
+        out.append({"file": "media/videos", "ok": all(item.get("ok") for item in media), "files": media})
     summary = {"ok": any(r["ok"] for r in out if r["file"] in {"pack.json", "fired.json"}), "files": out}
     print(json.dumps(summary, indent=2))
     return summary

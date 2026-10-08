@@ -488,11 +488,11 @@ def order_caption(
             f"Shop: {PRINTIFY_STORE}\n\n"
             "Follow Really Raised Rough:\n"
             "Instagram https://www.instagram.com/reallyraisedrough\n"
-            "YouTube https://www.youtube.com/@ReallyRRough\n"
+            "YouTube https://www.youtube.com/@ReallyRough\n"
             "X https://x.com/RRough10304\n"
             "Telegram https://t.me/ReallyRaisedRough\n"
-            "Snapchat https://www.snapchat.com/add/reallyraisedrough\n"
-            "TikTok https://www.tiktok.com/@reallyraisedrough\n"
+            "Snapchat https://www.snapchat.com/add/reallyrrough\n"
+            "TikTok https://www.tiktok.com/@really.raised.rough\n"
         )
     return (
         f"{title}\n"

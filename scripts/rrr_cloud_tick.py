@@ -471,7 +471,6 @@ def order_caption(
     ptype = (post_type or "image").lower()
     hook = HUMOR_HOOKS.get(humor, HUMOR_HOOKS["dark_humor"]) if humor else HUMOR_HOOKS["dark_humor"]
     match = _PLATFORM_MATCH.get(plat, _PLATFORM_MATCH["facebook"]).format(title=title, kind=kind)
-    shops = f"{COM_STORE}\n{PRINTIFY_STORE}"
     fresh_line = str(variation or "").strip()
     if plat == "x":
         extra = f"\n{fresh_line}" if fresh_line else ""
@@ -494,16 +493,21 @@ def order_caption(
             "Snapchat https://www.snapchat.com/add/reallyrrough\n"
             "TikTok https://www.tiktok.com/@really.raised.rough\n"
         )
+    heading = f"Shop Really Raised Rough: {STORE}/\n\n" if plat == "facebook" else ""
+    order_links = "" if plat == "facebook" else (
+        f"🛒 ORDER NOW — pick size, color, enter address, checkout:\n{url}\n"
+        f"{com_url}\n"
+        f"Shop: {COM_STORE}\n"
+        f"Shop: {PRINTIFY_STORE}\n"
+    )
     return (
+        f"{heading}"
         f"{title}\n"
         f"{hook}\n"
         f"{fresh_line + chr(10) if fresh_line else ''}"
         f"{match}\n"
         f"This {ptype} is the {title} {kind} — the description matches the design.\n"
-        f"🛒 ORDER NOW — pick size, color, enter address, checkout:\n{url}\n"
-        f"{com_url}\n"
-        f"Shop: {COM_STORE}\n"
-        f"Shop: {PRINTIFY_STORE}\n"
+        f"{order_links}"
         f"#reallyraisedrough #soberlife #recovery"
     )[:1800]
 

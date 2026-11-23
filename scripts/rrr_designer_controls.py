@@ -18,7 +18,7 @@ PACK_PATH = Path(os.getenv("RRR_PACK_PATH") or (ROOT / "pack.json"))
 
 DEFAULT_DESIGN_CONTROLS: dict[str, Any] = {
     "enabled": True,
-    "preview_only": True,
+    "preview_only": False,
     "limit_per_week": 2,
     "categories": ["serious_sobriety", "dark_humor", "funny", "heartfelt"],
     "styles": ["professional", "creative", "gritty", "comic_shaded"],

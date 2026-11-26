@@ -489,7 +489,7 @@ def order_caption(
             "Instagram https://www.instagram.com/reallyraisedrough\n"
             "YouTube https://www.youtube.com/@ReallyRough\n"
             "X https://x.com/RRough10304\n"
-            "Telegram https://t.me/ReallyRaisedRough\n"
+            "Telegram https://t.me/reallyrrough\n"
             "Snapchat https://www.snapchat.com/add/reallyrrough\n"
             "TikTok https://www.tiktok.com/@really.raised.rough\n"
         )
@@ -1073,7 +1073,7 @@ def post_telegram_image(image: str, caption: str) -> str:
     # private operational notification chat. Override the default handle with
     # TELEGRAM_PUBLIC_CHAT_IDS when the channel uses a numeric id or another
     # username.
-    chats = [x for x in (_env("TELEGRAM_PUBLIC_CHAT_IDS") or "@ReallyRaisedRough").replace(",", " ").split() if x]
+    chats = [("@reallyrrough" if x.lower() == "@reallyraisedrough" else x) for x in (_env("TELEGRAM_PUBLIC_CHAT_IDS") or "@reallyrrough").replace(",", " ").split() if x]
     if not token or not chats:
         return "skipped_no_telegram"
     last = "failed"
@@ -1094,7 +1094,7 @@ def post_telegram_image(image: str, caption: str) -> str:
 
 def post_telegram_video(video: Path, caption: str) -> str:
     token = _env("TELEGRAM_BOT_TOKEN")
-    chats = [x for x in (_env("TELEGRAM_PUBLIC_CHAT_IDS") or "@ReallyRaisedRough").replace(",", " ").split() if x]
+    chats = [("@reallyrrough" if x.lower() == "@reallyraisedrough" else x) for x in (_env("TELEGRAM_PUBLIC_CHAT_IDS") or "@reallyrrough").replace(",", " ").split() if x]
     if not token or not chats or not video.is_file():
         return "skipped_no_telegram"
     last = "failed"

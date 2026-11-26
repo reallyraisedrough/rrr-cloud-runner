@@ -40,6 +40,8 @@ VOICE_PATH = Path(os.getenv("RRR_VOICE_PATH") or (ROOT / "voice_settings.json"))
 GRAPH = "https://graph.facebook.com/v21.0"
 VIDEO_GRAPH = "https://graph-video.facebook.com/v21.0"
 STORE = "https://really-raised-rough.printify.me"
+PUBLIC_TELEGRAM_HANDLE = "@reallyrrough"
+LEGACY_TELEGRAM_HANDLES = ("@reallyraisedrough",)  # retired marketing handle
 IDENTITY = "https://2.3.4.6.1.8:0219/"
 TZ_NAME = os.getenv("RRR_TIMEZONE") or "America/Phoenix"
 DRY = (os.getenv("RRR_DRY_RUN") or "").strip().lower() in ("1", "true", "yes", "on")
@@ -1067,13 +1069,18 @@ def post_instagram_reel(video: Path, caption: str) -> str:
     return f"ok:{published.get('id')}" if published.get("id") else f"failed:{str(published)[:160]}"
 
 
+def _public_telegram_chats() -> list[str]:
+    """Scheduled/product content belongs in the public channel, never the
+    private operational chat. TELEGRAM_PUBLIC_CHAT_IDS may hold a numeric id
+    or another username; the retired marketing handle is rewritten."""
+    raw = _env("TELEGRAM_PUBLIC_CHAT_IDS") or PUBLIC_TELEGRAM_HANDLE
+    chats = [x for x in raw.replace(",", " ").split() if x]
+    return [PUBLIC_TELEGRAM_HANDLE if x.lower() in LEGACY_TELEGRAM_HANDLES else x for x in chats]
+
+
 def post_telegram_image(image: str, caption: str) -> str:
     token = _env("TELEGRAM_BOT_TOKEN")
-    # Scheduled/product content belongs in the public channel, never the
-    # private operational notification chat. Override the default handle with
-    # TELEGRAM_PUBLIC_CHAT_IDS when the channel uses a numeric id or another
-    # username.
-    chats = [("@reallyrrough" if x.lower() == "@reallyraisedrough" else x) for x in (_env("TELEGRAM_PUBLIC_CHAT_IDS") or "@reallyrrough").replace(",", " ").split() if x]
+    chats = _public_telegram_chats()
     if not token or not chats:
         return "skipped_no_telegram"
     last = "failed"
@@ -1094,7 +1101,7 @@ def post_telegram_image(image: str, caption: str) -> str:
 
 def post_telegram_video(video: Path, caption: str) -> str:
     token = _env("TELEGRAM_BOT_TOKEN")
-    chats = [("@reallyrrough" if x.lower() == "@reallyraisedrough" else x) for x in (_env("TELEGRAM_PUBLIC_CHAT_IDS") or "@reallyrrough").replace(",", " ").split() if x]
+    chats = _public_telegram_chats()
     if not token or not chats or not video.is_file():
         return "skipped_no_telegram"
     last = "failed"
